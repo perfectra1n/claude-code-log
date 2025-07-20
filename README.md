@@ -22,6 +22,7 @@ uvx claude-code-log@latest --open-browser
 
 ## Key Features
 
+- **Interactive TUI (Terminal User Interface)**: Browse and manage Claude Code sessions with real-time navigation, summaries, and quick actions for HTML export and session resuming
 - **Project Hierarchy Processing**: Process entire `~/.claude/projects/` directory with linked index page
 - **Individual Session Files**: Generate separate HTML files for each session with navigation links
 - **Single File or Directory Processing**: Convert individual JSONL files or specific directories
@@ -52,6 +53,36 @@ This tool helps you answer questions like:
 - **"How can I analyse patterns in my Claude Code usage?"**
 
 ## Usage
+
+### Interactive TUI (Terminal User Interface)
+
+The TUI provides an interactive interface for browsing and managing Claude Code sessions with real-time navigation, session summaries, and quick actions.
+
+```bash
+# Launch TUI for all projects (default behavior)
+claude-code-log --tui
+
+# Launch TUI for specific project directory
+claude-code-log /path/to/project --tui
+
+# Launch TUI for specific Claude project
+claude-code-log my-project --tui  # Automatically converts to ~/.claude/projects/-path-to-my-project
+```
+
+**TUI Features:**
+
+- **Session Listing**: Interactive table showing session IDs, summaries, timestamps, message counts, and token usage
+- **Smart Summaries**: Prioritizes Claude-generated summaries over first user messages for better session identification
+- **Working Directory Matching**: Automatically finds and opens projects matching your current working directory
+- **Quick Actions**:
+  - `h` or "Export to HTML" button: Generate and open session HTML in browser
+  - `c` or "Resume in Claude Code" button: Continue session with `claude -r <sessionId>`
+  - `r` or "Refresh" button: Reload session data from files
+  - `p` or "Projects View" button: Switch to project selector view
+- **Project Statistics**: Real-time display of total sessions, messages, tokens, and date range
+- **Cache Integration**: Leverages existing cache system for fast loading with automatic cache validation
+- **Keyboard Navigation**: Arrow keys to navigate, Enter to expand row details, `q` to quit
+- **Row Expansion**: Press Enter to expand selected row showing full summary, first user message, working directory, and detailed token usage
 
 ### Default Behavior (Process All Projects)
 
@@ -213,6 +244,51 @@ HTML coverage reports are generated in `htmlcov/index.html`.
 - **Generate Style Guide**: `uv run python scripts/generate_style_guide.py`
 
 Test with Claude transcript JSONL files typically found in `~/.claude/projects/` directories.
+
+## Release Process (For Maintainers)
+
+The project uses an automated release process with semantic versioning. Here's how to create and publish a new release:
+
+### Quick Release
+
+```bash
+# Bump version and create release (patch/minor/major)
+just release-prep patch    # For bug fixes
+just release-prep minor    # For new features
+just release-prep major    # For breaking changes
+
+# Or specify exact version
+just release-prep 0.4.3
+
+# Preview what would be released
+just release-preview
+
+# Push to PyPI and create GitHub release
+just release-push
+```
+
+3. **GitHub Release Only**: If you need to create/update just the GitHub release:
+
+   ```bash
+   just github-release          # For latest tag
+   just github-release 0.4.2    # For specific version
+   ```
+
+### Cache Structure and Benefits
+
+The tool implements a sophisticated caching system for performance:
+
+- **Cache Location**: `.cache/` directory within each project folder
+- **Session Metadata**: Pre-parsed session information (IDs, summaries, timestamps, token usage)
+- **Timestamp Index**: Enables fast date-range filtering without parsing full files
+- **Invalidation**: Automatic detection of stale cache based on file modification times
+- **Performance**: 10-100x faster loading for large projects with many sessions
+
+The cache is transparent to users and automatically rebuilds when:
+
+- Source JSONL files are modified
+- New sessions are added
+- Cache structure version changes
 
 ## Project Hierarchy Output
 

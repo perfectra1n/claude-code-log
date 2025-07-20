@@ -52,6 +52,7 @@ claude-code-log my-project --tui  # Automatically converts to ~/.claude/projects
   - `h` or "Export to HTML" button: Generate and open session HTML in browser
   - `c` or "Resume in Claude Code" button: Continue session with `claude -r <sessionId>`
   - `r` or "Refresh" button: Reload session data from files
+  - `p` or "Projects View" button: Switch to project selector view
 - **Project Statistics**: Real-time display of total sessions, messages, tokens, and date range
 - **Cache Integration**: Leverages existing cache system for fast loading with automatic cache validation
 - **Keyboard Navigation**: Arrow keys to navigate, Enter to expand row details, `q` to quit

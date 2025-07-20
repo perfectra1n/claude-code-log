@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CLI interface for claude-code-log."""
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -108,7 +109,10 @@ def find_projects_by_cwd(
                         convert_jsonl_to_html(project_dir, silent=True)
                         # Reload cache after building
                         project_cache = cache_manager.get_cached_project_data()
-                    except Exception:
+                    except Exception as e:
+                        logging.warning(
+                            f"Failed to build cache for project {project_dir.name}: {e}"
+                        )
                         # If cache building fails, fall back to path name matching
                         project_cache = None
 
@@ -117,10 +121,8 @@ def find_projects_by_cwd(
                 for cwd in project_cache.working_directories:
                     cwd_path = Path(cwd).resolve()
                     # Check for exact match or if current cwd is under this path
-                    if (
-                        current_cwd_path == cwd_path
-                        or current_cwd_path.is_relative_to(cwd_path)
-                        or cwd_path.is_relative_to(current_cwd_path)
+                    if current_cwd_path == cwd_path or current_cwd_path.is_relative_to(
+                        cwd_path
                     ):
                         matching_projects.append(project_dir)
                         break
@@ -318,6 +320,9 @@ def main(
 
     INPUT_PATH: Path to a Claude transcript JSONL file, directory containing JSONL files, or project path to convert. If not provided, defaults to ~/.claude/projects/ and --all-projects is used.
     """
+    # Configure logging to show warnings and above
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+
     try:
         # Handle TUI mode
         if tui:

@@ -17,7 +17,7 @@ This tool generates clean, minimalist HTML pages showing user prompts and assist
 TL;DR: run the command below and browse the pages generated from your entire Claude Code archives:
 
 ```sh
-uvx claude-code-log --open-browser
+uvx claude-code-log@latest --open-browser
 ```
 
 ## Key Features
@@ -275,10 +275,10 @@ Install using pip:
 pip install claude-code-log
 ```
 
-Or run directly with uvx (no installation required):
+Or run directly with uvx (no separate installation step required):
 
 ```bash
-uvx claude-code-log
+uvx claude-code-log@latest
 ```
 
 Or install from source:
@@ -292,9 +292,6 @@ uv run claude-code-log
 
 ## TODO
 
-- project names aren't rendered correctly in HTML when generating everything form a cold cache
-- make it possible to get to project selector in TUI even if pwd is a project
-- resuming session when launched from a different directory doesn't work
 - tutorial overlay
 - integrate `claude-trace` request logs if present?
 - Localised number formatting and timezone adjustment runtime? For this we'd need to make Jinja template variables more granular
@@ -314,3 +311,4 @@ uv run claude-code-log
 - Markdown renderer
 - figure out minimum Python version and introduce a testing matrix
 - add minimalist theme and make it light + dark; animate gradient background in fancy theme
+- do we need special handling for hooks?

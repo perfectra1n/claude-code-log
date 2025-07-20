@@ -1,0 +1,8 @@
+{
+    "search.exclude": {
+        ".claude-trace/**": true,
+        "docs/cache/**": true,
+        "docs/claude-code-log-transcript.html": true,
+        "test/test_data/cache/**": true,
+    },
+}

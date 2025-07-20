@@ -5,12 +5,12 @@ import os
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, cast
+from typing import ClassVar, Dict, Optional, cast
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.binding import Binding, BindingType
+from textual.containers import Container, Vertical
 from textual.widgets import (
-    Button,
     DataTable,
     Footer,
     Header,
@@ -20,7 +20,7 @@ from textual.widgets import (
 from textual.reactive import reactive
 
 from .cache import CacheManager, SessionCacheData, get_library_version
-from .converter import convert_jsonl_to_html
+from .converter import ensure_fresh_cache
 from .renderer import get_project_display_name
 
 
@@ -28,34 +28,21 @@ class ProjectSelector(App[Path]):
     """TUI for selecting a Claude project when multiple are found."""
 
     CSS = """
-    #main-container {
-        padding: 1;
-    }
-    
     #info-container {
         height: 3;
         border: solid $primary;
         margin-bottom: 1;
     }
     
-    #actions-container {
-        height: 3;
-        margin-top: 1;
-    }
-    
     DataTable {
         height: auto;
-    }
-    
-    Button {
-        margin: 0 1;
     }
     """
 
     TITLE = "Claude Code Log - Project Selector"
-    BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("enter", "select_project", "Select Project"),
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("q", "quit", "Quit"),
+        Binding("s", "select_project", "Select Project"),
     ]
 
     selected_project_path: reactive[Optional[Path]] = reactive(
@@ -89,11 +76,6 @@ class ProjectSelector(App[Path]):
                 # Project table
                 yield DataTable[str](id="projects-table", cursor_type="row")
 
-                # Action buttons
-                with Horizontal(id="actions-container"):
-                    yield Button("Select Project", variant="primary", id="select-btn")
-                    yield Button("Cancel", variant="default", id="cancel-btn")
-
         yield Footer()
 
     def on_mount(self) -> None:
@@ -110,35 +92,23 @@ class ProjectSelector(App[Path]):
         table.clear(columns=True)
 
         # Add columns
-        table.add_column("Project Name", width=40)
-        table.add_column("Working Directory", width=60)
+        table.add_column("Project", width=self.size.width - 13)
         table.add_column("Sessions", width=10)
-        table.add_column("Matches Current Dir", width=20)
-
-        # Prioritize matching projects
-        sorted_projects = self.matching_projects + [
-            p for p in self.projects if p not in self.matching_projects
-        ]
 
         # Add rows
-        for project_path in sorted_projects:
+        for project_path in self.projects:
             try:
                 cache_manager = CacheManager(project_path, get_library_version())
                 project_cache = cache_manager.get_cached_project_data()
 
-                # If cache is empty, try to build it
                 if not project_cache or not project_cache.sessions:
-                    # Check if we have any JSONL files to process
-                    jsonl_files = list(project_path.glob("*.jsonl"))
-                    if jsonl_files:
-                        try:
-                            # Build cache by processing the project
-                            convert_jsonl_to_html(project_path, silent=True)
-                            # Reload cache after building
-                            project_cache = cache_manager.get_cached_project_data()
-                        except Exception:
-                            # If cache building fails, continue with empty cache
-                            project_cache = None
+                    try:
+                        ensure_fresh_cache(project_path, cache_manager, silent=True)
+                        # Reload cache after ensuring it's fresh
+                        project_cache = cache_manager.get_cached_project_data()
+                    except Exception:
+                        # If cache building fails, continue with empty cache
+                        project_cache = None
 
                 # Get project info
                 session_count = (
@@ -147,50 +117,53 @@ class ProjectSelector(App[Path]):
                     else 0
                 )
 
-                # Get primary working directory
-                working_dir = "Unknown"
-                if project_cache and project_cache.working_directories:
-                    working_dir = min(project_cache.working_directories, key=len)
+                # Create project display - just use the directory name
+                project_display = f"  {project_path.name}"
 
-                # Check if matches current directory
-                matches_current = (
-                    "Yes" if project_path in self.matching_projects else "No"
-                )
+                # Add indicator if matches current directory
+                if project_path in self.matching_projects:
+                    project_display = f"→ {project_display[2:]}"
 
                 table.add_row(
-                    project_path.name,
-                    working_dir,
+                    project_display,
                     str(session_count),
-                    matches_current,
                 )
             except Exception:
                 # If we can't read cache, show basic info
+                project_display = f"  {project_path.name}"
+                if project_path in self.matching_projects:
+                    project_display = f"→ {project_display[2:]}"
+
                 table.add_row(
-                    project_path.name,
+                    project_display,
                     "Unknown",
-                    "Unknown",
-                    "Yes" if project_path in self.matching_projects else "No",
                 )
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle row selection in the projects table."""
-        table = cast(DataTable[str], self.query_one("#projects-table", DataTable))
-        row_data = table.get_row(event.row_key)
-        if row_data:
-            # Extract project name from the first column
-            project_name = str(row_data[0])
-            # Find the matching project path
-            for project_path in self.projects:
-                if project_path.name == project_name:
-                    self.selected_project_path = project_path
-                    break
+    def on_data_table_row_highlighted(self, _event: DataTable.RowHighlighted) -> None:
+        """Handle row highlighting (cursor movement) in the projects table."""
+        self._update_selected_project_from_cursor()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button press events."""
-        if event.button.id == "select-btn":
-            self.action_select_project()
-        elif event.button.id == "cancel-btn":
-            self.exit(None)
+    def _update_selected_project_from_cursor(self) -> None:
+        """Update the selected project based on the current cursor position."""
+        table = cast(DataTable[str], self.query_one("#projects-table", DataTable))
+        try:
+            row_data = table.get_row_at(table.cursor_row)
+            if row_data:
+                # Extract project display from the first column
+                project_display = str(row_data[0]).strip()
+
+                # Remove the arrow indicator if present
+                if project_display.startswith("→"):
+                    project_display = project_display[1:].strip()
+
+                # Find the matching project path
+                for project_path in self.projects:
+                    if project_path.name == project_display:
+                        self.selected_project_path = project_path
+                        break
+        except Exception:
+            # If we can't get the row data, don't update selection
+            pass
 
     def action_select_project(self) -> None:
         """Select the highlighted project."""
@@ -206,7 +179,7 @@ class ProjectSelector(App[Path]):
         self.exit(None)
 
 
-class SessionBrowser(App[None]):
+class SessionBrowser(App[Optional[str]]):
     """Interactive TUI for browsing and managing Claude Code Log sessions."""
 
     CSS = """
@@ -244,12 +217,13 @@ class SessionBrowser(App[None]):
     """
 
     TITLE = "Claude Code Log - Session Browser"
-    BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("h", "export_selected", "Open HTML page"),
-        ("c", "resume_selected", "Resume in Claude Code"),
-        ("e", "toggle_expanded", "Toggle Expanded View"),
-        ("?", "toggle_help", "Help"),
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("q", "quit", "Quit"),
+        Binding("h", "export_selected", "Open HTML page"),
+        Binding("c", "resume_selected", "Resume in Claude Code"),
+        Binding("e", "toggle_expanded", "Toggle Expanded View"),
+        Binding("p", "back_to_projects", "Open Project Selector"),
+        Binding("?", "toggle_help", "Help"),
     ]
 
     selected_session_id: reactive[Optional[str]] = reactive(cast(Optional[str], None))
@@ -308,10 +282,10 @@ class SessionBrowser(App[None]):
             # Use cached session data - cache is up to date
             self.sessions = project_cache.sessions
         else:
-            # Need to build cache - use converter to load and process all transcripts
+            # Need to build cache - use ensure_fresh_cache to populate cache if needed
             try:
-                # Use converter to build cache (it handles all the session processing)
-                convert_jsonl_to_html(self.project_path, silent=True)
+                # Use ensure_fresh_cache to build cache (it handles all the session processing)
+                ensure_fresh_cache(self.project_path, self.cache_manager, silent=True)
 
                 # Now get the updated cache data
                 project_cache = self.cache_manager.get_cached_project_data()
@@ -507,11 +481,7 @@ class SessionBrowser(App[None]):
         except (ValueError, AttributeError):
             return "Unknown"
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle row selection in the sessions table."""
-        self._update_selected_session_from_cursor()
-
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+    def on_data_table_row_highlighted(self, _event: DataTable.RowHighlighted) -> None:
         """Handle row highlighting (cursor movement) in the sessions table."""
         self._update_selected_session_from_cursor()
 
@@ -561,6 +531,19 @@ class SessionBrowser(App[None]):
             return
 
         try:
+            # Get the session's working directory if available
+            session_data = self.sessions.get(self.selected_session_id)
+            if session_data and session_data.cwd:
+                # Change to the session's working directory
+                target_dir = Path(session_data.cwd)
+                if target_dir.exists() and target_dir.is_dir():
+                    os.chdir(target_dir)
+                else:
+                    self.notify(
+                        f"Warning: Session working directory not found: {session_data.cwd}",
+                        severity="warning",
+                    )
+
             # Use Textual's suspend context manager for proper terminal cleanup
             with self.suspend():
                 # Terminal is properly restored here by Textual
@@ -665,9 +648,15 @@ class SessionBrowser(App[None]):
             "- e: Toggle expanded view for session\n"
             "- h: Open selected session's HTML page log\n"
             "- c: Resume selected session in Claude Code\n"
-            "- q: Quit application\n\n"
+            "- p: Open project selector\n"
+            "- q: Quit\n\n"
         )
         self.notify(help_text, timeout=10)
+
+    def action_back_to_projects(self) -> None:
+        """Navigate to the project selector."""
+        # Exit with a special return value to signal we want to go to project selector
+        self.exit(result="back_to_projects")
 
     async def action_quit(self) -> None:
         """Quit the application with proper cleanup."""
@@ -691,26 +680,26 @@ def run_project_selector(
         return None
 
 
-def run_session_browser(project_path: Path) -> None:
+def run_session_browser(project_path: Path) -> Optional[str]:
     """Run the session browser TUI for the given project path."""
     if not project_path.exists():
         print(f"Error: Project path {project_path} does not exist")
-        return
+        return None
 
     if not project_path.is_dir():
         print(f"Error: {project_path} is not a directory")
-        return
+        return None
 
     # Check if there are any JSONL files
     jsonl_files = list(project_path.glob("*.jsonl"))
     if not jsonl_files:
         print(f"Error: No JSONL transcript files found in {project_path}")
-        return
+        return None
 
     app = SessionBrowser(project_path)
     try:
-        app.run()
+        return app.run()
     except KeyboardInterrupt:
         # Textual handles terminal cleanup automatically
         print("\nInterrupted")
-        return
+        return None

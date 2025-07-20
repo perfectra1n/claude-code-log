@@ -188,7 +188,7 @@ class TestSessionBrowser:
         with (
             patch.object(app.cache_manager, "get_cached_project_data") as mock_cache,
             patch.object(app.cache_manager, "get_modified_files") as mock_modified,
-            patch("claude_code_log.tui.convert_jsonl_to_html") as mock_convert,
+            patch("claude_code_log.tui.ensure_fresh_cache") as mock_ensure,
         ):
             # First call returns initial cache, second call returns updated cache
             mock_cache.side_effect = [
@@ -208,7 +208,7 @@ class TestSessionBrowser:
                 await pilot.pause(1.0)
 
                 # Check that convert function was called due to modified files
-                mock_convert.assert_called_once()
+                mock_ensure.assert_called_once()
 
                 # Check that sessions were rebuilt from JSONL files
                 assert len(app.sessions) >= 2  # Should have session-123 and session-456
@@ -246,7 +246,7 @@ class TestSessionBrowser:
         with (
             patch.object(app.cache_manager, "get_cached_project_data") as mock_cache,
             patch.object(app.cache_manager, "get_modified_files") as mock_modified,
-            patch("claude_code_log.tui.convert_jsonl_to_html") as mock_convert,
+            patch("claude_code_log.tui.ensure_fresh_cache") as mock_ensure,
         ):
             # First call returns empty cache, second call returns built cache
             mock_cache.side_effect = [
@@ -263,7 +263,7 @@ class TestSessionBrowser:
                 await pilot.pause(1.0)
 
                 # Check that convert function was called to build cache
-                mock_convert.assert_called_once()
+                mock_ensure.assert_called_once()
 
                 # Check that sessions were built from JSONL files
                 assert len(app.sessions) >= 2  # Should have session-123 and session-456
@@ -367,14 +367,20 @@ class TestSessionBrowser:
         """Test export action when no session is selected."""
         app = SessionBrowser(temp_project_dir)
 
-        async with app.run_test() as pilot:
-            await pilot.pause()
+        with patch("claude_code_log.tui.webbrowser.open") as mock_browser:
+            async with app.run_test() as pilot:
+                await pilot.pause()
 
-            # Try to export without selecting a session
-            app.action_export_selected()
+                # Manually clear the selection (since DataTable auto-selects first row)
+                app.selected_session_id = None
 
-            # Should show warning (we can't easily test notifications in unit tests)
-            assert app.selected_session_id is None
+                # Try to export without selecting a session
+                app.action_export_selected()
+
+                # Should still have no selection (action should not change it)
+                assert app.selected_session_id is None
+                # Browser should not have been opened
+                mock_browser.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_export_action_with_selection(self, temp_project_dir):
@@ -382,21 +388,16 @@ class TestSessionBrowser:
         app = SessionBrowser(temp_project_dir)
         app.selected_session_id = "session-123"
 
-        with (
-            patch("claude_code_log.tui.convert_jsonl_to_html") as mock_convert,
-            patch("claude_code_log.tui.webbrowser.open") as mock_browser,
-        ):
-            mock_convert.return_value = temp_project_dir / "combined_transcripts.html"
-
+        with patch("claude_code_log.tui.webbrowser.open") as mock_browser:
             async with app.run_test() as pilot:
                 await pilot.pause(0.1)
 
                 # Test export action
                 app.action_export_selected()
 
-                # Check that export function was called
-                mock_convert.assert_called_once()
-                mock_browser.assert_called_once()
+                # Check that browser was opened with the session HTML file
+                expected_file = temp_project_dir / "session-session-123.html"
+                mock_browser.assert_called_once_with(f"file://{expected_file}")
 
     @pytest.mark.asyncio
     async def test_resume_action_no_selection(self, temp_project_dir):
@@ -406,10 +407,13 @@ class TestSessionBrowser:
         async with app.run_test() as pilot:
             await pilot.pause()
 
+            # Manually clear the selection (since DataTable auto-selects first row)
+            app.selected_session_id = None
+
             # Try to resume without selecting a session
             app.action_resume_selected()
 
-            # Should show warning
+            # Should still have no selection (action should not change it)
             assert app.selected_session_id is None
 
     @pytest.mark.asyncio

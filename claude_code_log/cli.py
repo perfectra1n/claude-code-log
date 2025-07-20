@@ -12,7 +12,7 @@ from .converter import convert_jsonl_to_html, process_projects_hierarchy
 from .cache import CacheManager, get_library_version
 
 
-def _launch_tui_with_cache_check(project_path: Path) -> None:
+def _launch_tui_with_cache_check(project_path: Path) -> Optional[str]:
     """Launch TUI with proper cache checking and user feedback."""
     click.echo("Checking cache and loading session data...")
 
@@ -50,7 +50,8 @@ def _launch_tui_with_cache_check(project_path: Path) -> None:
 
     from .tui import run_session_browser
 
-    run_session_browser(project_path)
+    result = run_session_browser(project_path)
+    return result
 
 
 def convert_project_path_to_claude_dir(input_path: Path) -> Path:
@@ -350,25 +351,63 @@ def main(
 
                 if len(project_dirs) == 1:
                     # Only one project, open it directly
-                    _launch_tui_with_cache_check(project_dirs[0])
+                    result = _launch_tui_with_cache_check(project_dirs[0])
+                    if result == "back_to_projects":
+                        # User wants to see project selector even though there's only one project
+                        from .tui import run_project_selector
+
+                        while True:
+                            selected_project = run_project_selector(
+                                project_dirs, matching_projects
+                            )
+                            if not selected_project:
+                                # User cancelled
+                                return
+
+                            result = _launch_tui_with_cache_check(selected_project)
+                            if result != "back_to_projects":
+                                # User quit normally
+                                return
                     return
                 elif matching_projects and len(matching_projects) == 1:
                     # Found exactly one project matching current working directory
                     click.echo(
                         f"Found project matching current directory: {matching_projects[0].name}"
                     )
-                    _launch_tui_with_cache_check(matching_projects[0])
+                    result = _launch_tui_with_cache_check(matching_projects[0])
+                    if result == "back_to_projects":
+                        # User wants to see project selector
+                        from .tui import run_project_selector
+
+                        while True:
+                            selected_project = run_project_selector(
+                                project_dirs, matching_projects
+                            )
+                            if not selected_project:
+                                # User cancelled
+                                return
+
+                            result = _launch_tui_with_cache_check(selected_project)
+                            if result != "back_to_projects":
+                                # User quit normally
+                                return
                     return
                 else:
                     # Multiple projects or multiple matching projects - show selector
                     from .tui import run_project_selector
 
-                    selected_project = run_project_selector(
-                        project_dirs, matching_projects
-                    )
-                    if selected_project:
-                        _launch_tui_with_cache_check(selected_project)
-                    return
+                    while True:
+                        selected_project = run_project_selector(
+                            project_dirs, matching_projects
+                        )
+                        if not selected_project:
+                            # User cancelled
+                            return
+
+                        result = _launch_tui_with_cache_check(selected_project)
+                        if result != "back_to_projects":
+                            # User quit normally
+                            return
             else:
                 # Single project directory
                 _launch_tui_with_cache_check(input_path)

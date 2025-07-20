@@ -38,23 +38,22 @@ from .cache import get_library_version
 def get_project_display_name(
     project_dir_name: str, working_directories: Optional[List[str]] = None
 ) -> str:
-    """Get the best display name for a project based on working directories.
+    """Get the display name for a project based on working directories.
 
     Args:
         project_dir_name: The Claude project directory name (e.g., "-Users-dain-workspace-claude-code-log")
         working_directories: List of working directories from cache data
 
     Returns:
-        The best project display name (e.g., "claude-code-log")
+        The project display name (e.g., "claude-code-log")
     """
     if working_directories:
-        # Find the working directory that represents the project root
-        # (shortest path that doesn't have another working directory as its parent)
-        working_paths = [Path(wd) for wd in working_directories]
+        # Convert to Path objects with their original indices for tracking recency
+        paths_with_indices = [(Path(wd), i) for i, wd in enumerate(working_directories)]
 
-        # Sort by path depth (number of parts) and then by length
-        # This prefers shorter, less nested paths
-        best_path = min(working_paths, key=lambda p: (len(p.parts), len(str(p))))
+        # Sort by: 1) path depth (fewer parts = less nested), 2) recency (lower index = more recent)
+        # This gives us the least nested path, with ties broken by recency
+        best_path, _ = min(paths_with_indices, key=lambda p: (len(p[0].parts), p[1]))
         return best_path.name
     else:
         # Fall back to converting project directory name

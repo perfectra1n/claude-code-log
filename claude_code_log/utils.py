@@ -2,6 +2,8 @@
 """Utility functions for message filtering and processing."""
 
 from typing import Union, List
+
+from claude_code_log.cache import SessionCacheData
 from .models import ContentItem, TextContent, TranscriptEntry
 
 
@@ -103,20 +105,36 @@ def extract_text_content_length(content: Union[str, List[ContentItem]]) -> int:
     return total_length
 
 
-def extract_working_directories_from_messages(
-    messages: List[TranscriptEntry],
+def extract_working_directories(
+    entries: List[TranscriptEntry] | List[SessionCacheData],
 ) -> List[str]:
-    """Extract unique working directories from a list of transcript messages.
+    """Extract unique working directories from a list of entries.
+
+    Ordered by timestamp (most recent first).
 
     Args:
-        messages: List of transcript entries to extract working directories from
+        entries: List of entries to extract working directories from
 
     Returns:
-        List of unique working directory paths found in the messages
+        List of unique working directory paths found in the entries
     """
-    working_directories: set[str] = set()
-    for message in messages:
-        if hasattr(message, "cwd") and message.cwd:
-            working_directories.add(message.cwd)
+    working_directories: dict[str, str] = {}
 
-    return list(working_directories)
+    for entry in entries:
+        cwd = getattr(entry, "cwd", None)
+        if not cwd:
+            continue
+
+        # Get appropriate timestamp based on entry type
+        if isinstance(entry, SessionCacheData):
+            timestamp = entry.last_timestamp
+        elif hasattr(entry, "timestamp"):
+            timestamp = getattr(entry, "timestamp", "")
+        else:
+            timestamp = ""
+
+        working_directories[cwd] = timestamp
+
+    # Sort by timestamp (most recent first) and return just the paths
+    sorted_dirs = sorted(working_directories.items(), key=lambda x: x[1], reverse=True)
+    return [path for path, _ in sorted_dirs]

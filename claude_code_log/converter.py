@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from .utils import (
     should_use_as_session_starter,
     create_session_preview,
-    extract_working_directories_from_messages,
+    extract_working_directories,
 )
 from .cache import CacheManager, SessionCacheData, get_library_version
 from .parser import (
@@ -68,7 +68,7 @@ def convert_jsonl_to_html(
             output_path = input_path / "combined_transcripts.html"
 
         # Phase 1: Ensure cache is fresh and populated
-        _ensure_fresh_cache(input_path, cache_manager, from_date, to_date, silent)
+        ensure_fresh_cache(input_path, cache_manager, from_date, to_date, silent)
 
         # Phase 2: Load messages (will use fresh cache when available)
         messages = load_directory_transcripts(
@@ -76,7 +76,7 @@ def convert_jsonl_to_html(
         )
 
         # Extract working directories directly from parsed messages
-        working_directories = extract_working_directories_from_messages(messages)
+        working_directories = extract_working_directories(messages)
 
         project_title = get_project_display_name(input_path.name, working_directories)
         title = f"Claude Transcripts - {project_title}"
@@ -118,7 +118,7 @@ def convert_jsonl_to_html(
     return output_path
 
 
-def _ensure_fresh_cache(
+def ensure_fresh_cache(
     project_dir: Path,
     cache_manager: Optional[CacheManager],
     from_date: Optional[str] = None,
@@ -294,14 +294,10 @@ def _update_cache_with_session_data(
     # Update cache with session data
     cache_manager.update_session_cache(sessions_cache_data)
 
-    # Collect unique working directories from sessions
-    working_directories: set[str] = set()
-    for session_cache in sessions_cache_data.values():
-        if session_cache.cwd:
-            working_directories.add(session_cache.cwd)
-
     # Update cache with working directories
-    cache_manager.update_working_directories(list(working_directories))
+    cache_manager.update_working_directories(
+        extract_working_directories(list(sessions_cache_data.values()))
+    )
 
     # Update cache with project aggregates
     cache_manager.update_project_aggregates(
@@ -499,14 +495,28 @@ def _generate_individual_session_files(
             date_range_str = " ".join(date_range_parts)
             session_title += f" ({date_range_str})"
 
-        # Generate session HTML
-        session_html = generate_session_html(
-            messages, session_id, session_title, cache_manager
+        # Check if session file needs regeneration
+        session_file_path = output_dir / f"session-{session_id}.html"
+
+        # Only regenerate if outdated, doesn't exist, or date filtering is active
+        should_regenerate_session = (
+            is_html_outdated(session_file_path)
+            or from_date is not None
+            or to_date is not None
+            or not session_file_path.exists()
         )
 
-        # Write session file
-        session_file_path = output_dir / f"session-{session_id}.html"
-        session_file_path.write_text(session_html, encoding="utf-8")
+        if should_regenerate_session:
+            # Generate session HTML
+            session_html = generate_session_html(
+                messages, session_id, session_title, cache_manager
+            )
+            # Write session file
+            session_file_path.write_text(session_html, encoding="utf-8")
+        else:
+            print(
+                f"Session file {session_file_path.name} is current, skipping regeneration"
+            )
 
 
 def process_projects_hierarchy(
@@ -546,7 +556,7 @@ def process_projects_hierarchy(
                     print(f"Warning: Failed to initialize cache for {project_dir}: {e}")
 
             # Phase 1: Ensure cache is fresh and populated
-            _ensure_fresh_cache(project_dir, cache_manager, from_date, to_date)
+            ensure_fresh_cache(project_dir, cache_manager, from_date, to_date)
 
             # Phase 2: Generate HTML for this project (including individual session files)
             output_path = convert_jsonl_to_html(
@@ -622,12 +632,6 @@ def process_projects_hierarchy(
             # Collect session data for this project
             sessions_data = _collect_project_sessions(messages)
 
-            # Collect working directories from messages
-            working_directories: set[str] = set()
-            for message in messages:
-                if hasattr(message, "cwd") and message.cwd:
-                    working_directories.add(message.cwd)
-
             for message in messages:
                 # Track latest and earliest timestamps across all messages
                 if hasattr(message, "timestamp"):
@@ -682,7 +686,7 @@ def process_projects_hierarchy(
                     "total_cache_read_tokens": total_cache_read_tokens,
                     "latest_timestamp": latest_timestamp,
                     "earliest_timestamp": earliest_timestamp,
-                    "working_directories": list(working_directories),
+                    "working_directories": extract_working_directories(messages),
                     "sessions": sessions_data,
                 }
             )

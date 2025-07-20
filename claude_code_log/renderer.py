@@ -13,7 +13,6 @@ import mistune
 from jinja2 import Environment, FileSystemLoader
 
 from .models import (
-    AssistantTranscriptEntry,
     TranscriptEntry,
     SummaryTranscriptEntry,
     SystemTranscriptEntry,
@@ -31,6 +30,8 @@ from .utils import (
     should_skip_message,
     should_use_as_session_starter,
     create_session_preview,
+    map_summaries_to_sessions,
+    format_token_usage,
 )
 from .cache import get_library_version
 
@@ -542,20 +543,12 @@ class TemplateProject:
             self.formatted_last_interaction = ""
 
         # Format token usage
-        self.token_summary = ""
-        if self.total_input_tokens > 0 or self.total_output_tokens > 0:
-            token_parts: List[str] = []
-            if self.total_input_tokens > 0:
-                token_parts.append(f"Input: {self.total_input_tokens}")
-            if self.total_output_tokens > 0:
-                token_parts.append(f"Output: {self.total_output_tokens}")
-            if self.total_cache_creation_tokens > 0:
-                token_parts.append(
-                    f"Cache Creation: {self.total_cache_creation_tokens}"
-                )
-            if self.total_cache_read_tokens > 0:
-                token_parts.append(f"Cache Read: {self.total_cache_read_tokens}")
-            self.token_summary = " | ".join(token_parts)
+        self.token_summary = format_token_usage(
+            input_tokens=self.total_input_tokens,
+            output_tokens=self.total_output_tokens,
+            cache_creation_tokens=self.total_cache_creation_tokens,
+            cache_read_tokens=self.total_cache_read_tokens,
+        )
 
 
 class TemplateSummary:
@@ -624,20 +617,12 @@ class TemplateSummary:
             self.formatted_time_range = ""
 
         # Format token usage summary
-        self.token_summary = ""
-        if self.total_input_tokens > 0 or self.total_output_tokens > 0:
-            token_parts: List[str] = []
-            if self.total_input_tokens > 0:
-                token_parts.append(f"Input: {self.total_input_tokens}")
-            if self.total_output_tokens > 0:
-                token_parts.append(f"Output: {self.total_output_tokens}")
-            if self.total_cache_creation_tokens > 0:
-                token_parts.append(
-                    f"Cache Creation: {self.total_cache_creation_tokens}"
-                )
-            if self.total_cache_read_tokens > 0:
-                token_parts.append(f"Cache Read: {self.total_cache_read_tokens}")
-            self.token_summary = " | ".join(token_parts)
+        self.token_summary = format_token_usage(
+            input_tokens=self.total_input_tokens,
+            output_tokens=self.total_output_tokens,
+            cache_creation_tokens=self.total_cache_creation_tokens,
+            cache_read_tokens=self.total_cache_read_tokens,
+        )
 
 
 def _get_combined_transcript_link(cache_manager: "CacheManager") -> Optional[str]:
@@ -695,34 +680,7 @@ def generate_html(
         title = "Claude Transcript"
 
     # Pre-process to find and attach session summaries
-    session_summaries: Dict[str, str] = {}
-    uuid_to_session: Dict[str, str] = {}
-    uuid_to_session_backup: Dict[str, str] = {}
-
-    # Build mapping from message UUID to session ID
-    for message in messages:
-        if hasattr(message, "uuid") and hasattr(message, "sessionId"):
-            message_uuid = getattr(message, "uuid", "")
-            session_id = getattr(message, "sessionId", "")
-            if message_uuid and session_id:
-                # There is often duplication, in that case we want to prioritise the assistant
-                # message because summaries are generated from Claude's (last) success message
-                if type(message) is AssistantTranscriptEntry:
-                    uuid_to_session[message_uuid] = session_id
-                else:
-                    uuid_to_session_backup[message_uuid] = session_id
-
-    # Map summaries to sessions via leafUuid -> message UUID -> session ID
-    for message in messages:
-        if isinstance(message, SummaryTranscriptEntry):
-            leaf_uuid = message.leafUuid
-            if leaf_uuid in uuid_to_session:
-                session_summaries[uuid_to_session[leaf_uuid]] = message.summary
-            elif (
-                leaf_uuid in uuid_to_session_backup
-                and uuid_to_session_backup[leaf_uuid] not in session_summaries
-            ):
-                session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
+    session_summaries, _ = map_summaries_to_sessions(messages)
 
     # Attach summaries to messages
     for message in messages:
@@ -935,17 +893,12 @@ def generate_html(
             ):
                 # Only show token usage for messages marked as first occurrence of requestId
                 usage = assistant_message.usage
-                token_parts = [
-                    f"Input: {usage.input_tokens}",
-                    f"Output: {usage.output_tokens}",
-                ]
-                if usage.cache_creation_input_tokens:
-                    token_parts.append(
-                        f"Cache Creation: {usage.cache_creation_input_tokens}"
-                    )
-                if usage.cache_read_input_tokens:
-                    token_parts.append(f"Cache Read: {usage.cache_read_input_tokens}")
-                token_usage_str = " | ".join(token_parts)
+                token_usage_str = format_token_usage(
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cache_creation_tokens=usage.cache_creation_input_tokens or 0,
+                    cache_read_tokens=usage.cache_read_input_tokens or 0,
+                )
 
         # Determine CSS class and content based on message type and duplicate status
         if message_type == "summary":
@@ -1150,16 +1103,13 @@ def generate_html(
         total_cache_read = session_info["total_cache_read_tokens"]
 
         if total_input > 0 or total_output > 0:
-            token_parts: List[str] = []
-            if total_input > 0:
-                token_parts.append(f"Input: {total_input}")
-            if total_output > 0:
-                token_parts.append(f"Output: {total_output}")
-            if total_cache_creation > 0:
-                token_parts.append(f"Cache Creation: {total_cache_creation}")
-            if total_cache_read > 0:
-                token_parts.append(f"Cache Read: {total_cache_read}")
-            token_summary = "Token usage – " + " | ".join(token_parts)
+            token_str = format_token_usage(
+                input_tokens=total_input,
+                output_tokens=total_output,
+                cache_creation_tokens=total_cache_creation,
+                cache_read_tokens=total_cache_read,
+            )
+            token_summary = f"Token usage – {token_str}" if token_str else ""
 
         session_nav.append(
             {

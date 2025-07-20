@@ -20,6 +20,7 @@ from textual.widgets import (
 from textual.reactive import reactive
 
 from .cache import CacheManager, SessionCacheData, get_library_version
+from .utils import format_token_usage
 from .converter import ensure_fresh_cache
 from .renderer import get_project_display_name
 
@@ -603,15 +604,25 @@ class SessionBrowser(App[Optional[str]]):
             session_data.total_input_tokens + session_data.total_output_tokens
         )
         if total_tokens > 0:
-            token_details = f"Input: {session_data.total_input_tokens:,} | Output: {session_data.total_output_tokens:,}"
-            if session_data.total_cache_creation_tokens > 0:
-                token_details += (
-                    f" | Cache Creation: {session_data.total_cache_creation_tokens:,}"
-                )
-            if session_data.total_cache_read_tokens > 0:
-                token_details += (
-                    f" | Cache Read: {session_data.total_cache_read_tokens:,}"
-                )
+            token_details = format_token_usage(
+                input_tokens=session_data.total_input_tokens,
+                output_tokens=session_data.total_output_tokens,
+                cache_creation_tokens=session_data.total_cache_creation_tokens,
+                cache_read_tokens=session_data.total_cache_read_tokens,
+            )
+            # Add thousand separators to the formatted string
+            for match in ["Input:", "Output:", "Cache Creation:", "Cache Read:"]:
+                if match in token_details:
+                    # Split on the match, format the number part
+                    parts = token_details.split(match, 1)
+                    if len(parts) == 2 and parts[1]:
+                        # Extract number, format it, and reassemble
+                        num_str = parts[1].split("|")[0].strip()
+                        if num_str.isdigit():
+                            formatted_num = f"{int(num_str):,}"
+                            token_details = token_details.replace(
+                                f"{match} {num_str}", f"{match} {formatted_num}"
+                            )
             content_parts.append(f"\n[bold]Token Usage:[/bold] {token_details}")
 
         expanded_content.update("\n".join(content_parts))

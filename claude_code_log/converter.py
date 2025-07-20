@@ -12,6 +12,8 @@ from .utils import (
     should_use_as_session_starter,
     create_session_preview,
     extract_working_directories,
+    map_summaries_to_sessions,
+    aggregate_token_usage,
 )
 from .cache import CacheManager, SessionCacheData, get_library_version
 from .parser import (
@@ -21,7 +23,6 @@ from .parser import (
 )
 from .models import (
     TranscriptEntry,
-    AssistantTranscriptEntry,
     SummaryTranscriptEntry,
     UserTranscriptEntry,
 )
@@ -166,33 +167,8 @@ def _update_cache_with_session_data(
     """Update cache with session and project aggregate data."""
     from .parser import extract_text_content
 
-    # Collect session data (similar to _collect_project_sessions but for cache)
-    session_summaries: Dict[str, str] = {}
-    uuid_to_session: Dict[str, str] = {}
-    uuid_to_session_backup: Dict[str, str] = {}
-
-    # Build mapping from message UUID to session ID
-    for message in messages:
-        if hasattr(message, "uuid") and hasattr(message, "sessionId"):
-            message_uuid = getattr(message, "uuid", "")
-            session_id = getattr(message, "sessionId", "")
-            if message_uuid and session_id:
-                if type(message) is AssistantTranscriptEntry:
-                    uuid_to_session[message_uuid] = session_id
-                else:
-                    uuid_to_session_backup[message_uuid] = session_id
-
-    # Map summaries to sessions
-    for message in messages:
-        if isinstance(message, SummaryTranscriptEntry):
-            leaf_uuid = message.leafUuid
-            if leaf_uuid in uuid_to_session:
-                session_summaries[uuid_to_session[leaf_uuid]] = message.summary
-            elif (
-                leaf_uuid in uuid_to_session_backup
-                and uuid_to_session_backup[leaf_uuid] not in session_summaries
-            ):
-                session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
+    # Collect session data using shared utility
+    session_summaries, _ = map_summaries_to_sessions(messages)
 
     # Group messages by session and calculate session data
     sessions_cache_data: Dict[str, SessionCacheData] = {}
@@ -270,26 +246,34 @@ def _update_cache_with_session_data(
                 usage = assistant_message.usage
 
                 # Add to project totals
-                total_input_tokens += usage.input_tokens or 0
-                total_output_tokens += usage.output_tokens or 0
-                if usage.cache_creation_input_tokens:
-                    total_cache_creation_tokens += usage.cache_creation_input_tokens
-                if usage.cache_read_input_tokens:
-                    total_cache_read_tokens += usage.cache_read_input_tokens
+                project_totals = {
+                    "input": total_input_tokens,
+                    "output": total_output_tokens,
+                    "cache_creation": total_cache_creation_tokens,
+                    "cache_read": total_cache_read_tokens,
+                }
+                aggregate_token_usage(usage, project_totals)
+                total_input_tokens = project_totals["input"]
+                total_output_tokens = project_totals["output"]
+                total_cache_creation_tokens = project_totals["cache_creation"]
+                total_cache_read_tokens = project_totals["cache_read"]
 
                 # Add to session totals
                 if session_id in sessions_cache_data:
                     session_cache = sessions_cache_data[session_id]
-                    session_cache.total_input_tokens += usage.input_tokens or 0
-                    session_cache.total_output_tokens += usage.output_tokens or 0
-                    if usage.cache_creation_input_tokens:
-                        session_cache.total_cache_creation_tokens += (
-                            usage.cache_creation_input_tokens
-                        )
-                    if usage.cache_read_input_tokens:
-                        session_cache.total_cache_read_tokens += (
-                            usage.cache_read_input_tokens
-                        )
+                    session_totals = {
+                        "input": session_cache.total_input_tokens,
+                        "output": session_cache.total_output_tokens,
+                        "cache_creation": session_cache.total_cache_creation_tokens,
+                        "cache_read": session_cache.total_cache_read_tokens,
+                    }
+                    aggregate_token_usage(usage, session_totals)
+                    session_cache.total_input_tokens = session_totals["input"]
+                    session_cache.total_output_tokens = session_totals["output"]
+                    session_cache.total_cache_creation_tokens = session_totals[
+                        "cache_creation"
+                    ]
+                    session_cache.total_cache_read_tokens = session_totals["cache_read"]
 
     # Update cache with session data
     cache_manager.update_session_cache(sessions_cache_data)
@@ -331,37 +315,8 @@ def _collect_project_sessions(messages: List[TranscriptEntry]) -> List[Dict[str,
     from .parser import extract_text_content
 
     # Pre-process to find and attach session summaries
-    # This matches the logic from renderer.py generate_html() exactly
-    session_summaries: Dict[str, str] = {}
-    uuid_to_session: Dict[str, str] = {}
-    uuid_to_session_backup: Dict[str, str] = {}
-
-    # Build mapping from message UUID to session ID across ALL messages
-    # This allows summaries from later sessions to be matched to earlier sessions
-    for message in messages:
-        if hasattr(message, "uuid") and hasattr(message, "sessionId"):
-            message_uuid = getattr(message, "uuid", "")
-            session_id = getattr(message, "sessionId", "")
-            if message_uuid and session_id:
-                # There is often duplication, in that case we want to prioritise the assistant
-                # message because summaries are generated from Claude's (last) success message
-                if type(message) is AssistantTranscriptEntry:
-                    uuid_to_session[message_uuid] = session_id
-                else:
-                    uuid_to_session_backup[message_uuid] = session_id
-
-    # Map summaries to sessions via leafUuid -> message UUID -> session ID
-    # Summaries can be in different sessions than the messages they summarize
-    for message in messages:
-        if isinstance(message, SummaryTranscriptEntry):
-            leaf_uuid = message.leafUuid
-            if leaf_uuid in uuid_to_session:
-                session_summaries[uuid_to_session[leaf_uuid]] = message.summary
-            elif (
-                leaf_uuid in uuid_to_session_backup
-                and uuid_to_session_backup[leaf_uuid] not in session_summaries
-            ):
-                session_summaries[uuid_to_session_backup[leaf_uuid]] = message.summary
+    # Use shared utility to map summaries to sessions
+    session_summaries, _ = map_summaries_to_sessions(messages)
 
     # Group messages by session
     sessions: Dict[str, Dict[str, Any]] = {}
@@ -663,14 +618,17 @@ def process_projects_hierarchy(
                         seen_request_ids.add(request_id)
 
                         usage = assistant_message.usage
-                        total_input_tokens += usage.input_tokens or 0
-                        total_output_tokens += usage.output_tokens or 0
-                        if usage.cache_creation_input_tokens:
-                            total_cache_creation_tokens += (
-                                usage.cache_creation_input_tokens
-                            )
-                        if usage.cache_read_input_tokens:
-                            total_cache_read_tokens += usage.cache_read_input_tokens
+                        totals = {
+                            "input": total_input_tokens,
+                            "output": total_output_tokens,
+                            "cache_creation": total_cache_creation_tokens,
+                            "cache_read": total_cache_read_tokens,
+                        }
+                        aggregate_token_usage(usage, totals)
+                        total_input_tokens = totals["input"]
+                        total_output_tokens = totals["output"]
+                        total_cache_creation_tokens = totals["cache_creation"]
+                        total_cache_read_tokens = totals["cache_read"]
 
             project_summaries.append(
                 {

@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """Utility functions for message filtering and processing."""
 
-from typing import Union, List
+from typing import Union, List, Dict, Tuple, Optional
 
 from claude_code_log.cache import SessionCacheData
-from .models import ContentItem, TextContent, TranscriptEntry
+from .models import (
+    ContentItem,
+    TextContent,
+    TranscriptEntry,
+    UserTranscriptEntry,
+    AssistantTranscriptEntry,
+    SummaryTranscriptEntry,
+    UsageInfo,
+)
 
 
 def is_system_message(text_content: str) -> bool:
@@ -138,3 +146,102 @@ def extract_working_directories(
     # Sort by timestamp (most recent first) and return just the paths
     sorted_dirs = sorted(working_directories.items(), key=lambda x: x[1], reverse=True)
     return [path for path, _ in sorted_dirs]
+
+
+def map_summaries_to_sessions(
+    entries: List[TranscriptEntry],
+) -> Tuple[Dict[str, str], Dict[str, SummaryTranscriptEntry]]:
+    """Map session summaries to their corresponding sessions.
+
+    This function creates a mapping from session IDs to summaries by tracking
+    message UUIDs and matching them with summary leafUuids.
+
+    Args:
+        entries: List of transcript entries containing messages and summaries
+
+    Returns:
+        A tuple of:
+        - Dict mapping session_id to session summary text
+        - Dict mapping session_id to the full SummaryTranscriptEntry object
+    """
+    # Build UUID to session ID mapping
+    uuid_to_session: Dict[str, str] = {}
+    uuid_to_session_backup: Dict[str, str] = {}
+
+    for entry in entries:
+        if isinstance(entry, (UserTranscriptEntry, AssistantTranscriptEntry)):
+            # Prioritize assistant messages for mapping
+            if isinstance(entry, AssistantTranscriptEntry):
+                uuid_to_session[entry.uuid] = entry.sessionId
+            else:
+                # Use backup mapping for user messages
+                uuid_to_session_backup[entry.uuid] = entry.sessionId
+
+    # Map summaries to sessions
+    session_summaries: Dict[str, str] = {}
+    session_summary_entries: Dict[str, SummaryTranscriptEntry] = {}
+
+    for entry in entries:
+        if isinstance(entry, SummaryTranscriptEntry):
+            # Try primary mapping first (assistant messages)
+            session_id = uuid_to_session.get(entry.leafUuid)
+            if not session_id:
+                # Fall back to backup mapping (user messages)
+                session_id = uuid_to_session_backup.get(entry.leafUuid)
+
+            if session_id:
+                session_summaries[session_id] = entry.summary
+                session_summary_entries[session_id] = entry
+
+    return session_summaries, session_summary_entries
+
+
+def format_token_usage(
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> str:
+    """Format token usage for display in a consistent way.
+
+    Args:
+        input_tokens: Number of input tokens
+        output_tokens: Number of output tokens
+        cache_creation_tokens: Number of cache creation tokens
+        cache_read_tokens: Number of cache read tokens
+
+    Returns:
+        Formatted string like "Input: 100 | Output: 50 | Cache Creation: 25"
+    """
+    token_parts: List[str] = []
+    if input_tokens > 0:
+        token_parts.append(f"Input: {input_tokens}")
+    if output_tokens > 0:
+        token_parts.append(f"Output: {output_tokens}")
+    if cache_creation_tokens > 0:
+        token_parts.append(f"Cache Creation: {cache_creation_tokens}")
+    if cache_read_tokens > 0:
+        token_parts.append(f"Cache Read: {cache_read_tokens}")
+    return " | ".join(token_parts) if token_parts else ""
+
+
+def aggregate_token_usage(
+    usage: Optional[UsageInfo],
+    totals: Dict[str, int],
+) -> None:
+    """Aggregate token usage into running totals.
+
+    Args:
+        usage: UsageInfo object to aggregate
+        totals: Dictionary with keys 'input', 'output', 'cache_creation', 'cache_read'
+               that will be updated in place
+    """
+    if not usage:
+        return
+
+    totals["input"] += usage.input_tokens or 0
+    totals["output"] += usage.output_tokens or 0
+    if usage.cache_creation_input_tokens:
+        totals["cache_creation"] += usage.cache_creation_input_tokens
+    if usage.cache_read_input_tokens:
+        totals["cache_read"] += usage.cache_read_input_tokens

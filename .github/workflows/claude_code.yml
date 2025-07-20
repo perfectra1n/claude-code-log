@@ -44,3 +44,4 @@ jobs:
           timeout_minutes: "120"
           allowed_tools: "Bash,Edit,MultiEdit,View,GlobTool,Glob,GrepTool,Grep,BatchTool,Batch,LS,Read,Write,Replace,NotebookEditCell,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,mcp__github_file_ops__update_claude_comment,WebSearch,WebFetch"
           max_turns: "500"
+          custom_instructions: "Ignore diffs in JSON and HTML files (when doing a PR review) as they are very large. If you have to read their contents in a feature or bugfix branch, use seletive tools like jq or sed"

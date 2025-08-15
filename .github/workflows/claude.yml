@@ -33,6 +33,8 @@ jobs:
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@beta
+        env:
+          ALLOWED_TOOLS: "Bash,Edit,MultiEdit,View,GlobTool,Glob,GrepTool,Grep,BatchTool,Batch,LS,Read,Write,Replace,NotebookEditCell,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,mcp__github_file_ops__update_claude_comment,WebSearch,WebFetch"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
@@ -49,8 +51,9 @@ jobs:
           # Optional: Trigger when specific user is assigned to an issue
           # assignee_trigger: "claude-bot"
           
-          # Optional: Allow Claude to run specific commands
-          # allowed_tools: "Bash(npm install),Bash(npm run build),Bash(npm run test:*),Bash(npm run lint:*)"
+          timeout_minutes: "120"
+          allowed_tools: "Bash,Edit,MultiEdit,View,GlobTool,Glob,GrepTool,Grep,BatchTool,Batch,LS,Read,Write,Replace,NotebookEditCell,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,mcp__github_file_ops__update_claude_comment,WebSearch,WebFetch"
+          max_turns: "500"
           
           # Optional: Add custom instructions for Claude to customize its behavior for your project
           # custom_instructions: |

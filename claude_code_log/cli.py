@@ -117,7 +117,7 @@ def find_projects_by_cwd(
 def _find_exact_matches(project_dirs: List[Path], current_cwd_path: Path) -> List[Path]:
     """Find projects with exact working directory matches using path-based matching."""
     expected_project_dir = convert_project_path_to_claude_dir(current_cwd_path)
-    
+
     for project_dir in project_dirs:
         if project_dir == expected_project_dir:
             return [project_dir]

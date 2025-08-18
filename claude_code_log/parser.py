@@ -140,7 +140,7 @@ def load_transcript(
     # Parse from source file
     messages: List[TranscriptEntry] = []
 
-    with open(jsonl_path, "r", encoding="utf-8") as f:
+    with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
         if not silent:
             print(f"Processing {jsonl_path}...")
         for line_no, line in enumerate(f):

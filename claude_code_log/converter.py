@@ -34,6 +34,48 @@ from .renderer import (
 )
 
 
+def sanitize_unicode_for_utf8(text: str) -> str:
+    """
+    Sanitize a string by removing or replacing Unicode characters that cannot be encoded as UTF-8.
+    
+    This function specifically handles:
+    - Unpaired surrogate characters (U+D800-U+DFFF)
+    - Other characters that may cause UnicodeEncodeError
+    
+    Args:
+        text: The input string to sanitize
+        
+    Returns:
+        A sanitized string that can be safely encoded as UTF-8
+    """
+    if not text:
+        return text
+        
+    # Use 'replace' error handling to replace problematic characters
+    # First, try to encode and decode to catch encoding issues
+    try:
+        # This will raise UnicodeEncodeError if there are problematic characters
+        text.encode('utf-8', errors='strict')
+        return text
+    except UnicodeEncodeError:
+        # If there's an encoding error, sanitize the string
+        # Convert to bytes using 'replace' error handling, then back to string
+        sanitized_bytes = text.encode('utf-8', errors='replace')
+        sanitized_text = sanitized_bytes.decode('utf-8')
+        
+        # Additional manual cleanup for surrogate characters
+        result = []
+        for char in sanitized_text:
+            code_point = ord(char)
+            # Replace surrogate characters with replacement character
+            if 0xD800 <= code_point <= 0xDFFF:
+                result.append('\uFFFD')  # Unicode replacement character
+            else:
+                result.append(char)
+        
+        return ''.join(result)
+
+
 def convert_jsonl_to_html(
     input_path: Path,
     output_path: Optional[Path] = None,
@@ -105,7 +147,9 @@ def convert_jsonl_to_html(
 
     if should_regenerate:
         html_content = generate_html(messages, title)
-        output_path.write_text(html_content, encoding="utf-8")
+        # Sanitize Unicode characters to prevent UnicodeEncodeError
+        sanitized_html_content = sanitize_unicode_for_utf8(html_content)
+        output_path.write_text(sanitized_html_content, encoding="utf-8")
     else:
         print(f"HTML file {output_path.name} is current, skipping regeneration")
 
@@ -511,8 +555,10 @@ def _generate_individual_session_files(
             session_html = generate_session_html(
                 messages, session_id, session_title, cache_manager
             )
+            # Sanitize Unicode characters to prevent UnicodeEncodeError
+            sanitized_session_html = sanitize_unicode_for_utf8(session_html)
             # Write session file
-            session_file_path.write_text(session_html, encoding="utf-8")
+            session_file_path.write_text(sanitized_session_html, encoding="utf-8")
         else:
             print(
                 f"Session file {session_file_path.name} is current, skipping regeneration"
@@ -702,7 +748,9 @@ def process_projects_hierarchy(
     index_path = projects_path / "index.html"
     if is_html_outdated(index_path) or from_date or to_date:
         index_html = generate_projects_index_html(project_summaries, from_date, to_date)
-        index_path.write_text(index_html, encoding="utf-8")
+        # Sanitize Unicode characters to prevent UnicodeEncodeError
+        sanitized_index_html = sanitize_unicode_for_utf8(index_html)
+        index_path.write_text(sanitized_index_html, encoding="utf-8")
     else:
         print("Index HTML is current, skipping regeneration")
 

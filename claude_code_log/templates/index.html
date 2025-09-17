@@ -8,9 +8,10 @@
     <title>{{ title }}</title>
     {% from 'components/session_nav.html' import render_session_nav %}
     <style>
-        {% include 'components/global_styles.css' %}
-        {% include 'components/session_nav_styles.css' %}
-        {% include 'components/project_card_styles.css' %}
+{% include 'components/global_styles.css' %}
+{% include 'components/session_nav_styles.css' %}
+{% include 'components/project_card_styles.css' %}
+{% include 'components/search_styles.css' %}
 
         /* Session navigation overrides for better text readability */
         .project-sessions .session-link {
@@ -21,6 +22,9 @@
 
 <body>
     <h1>{{ title }}</h1>
+
+    <!-- Search Component -->
+    {% include 'components/search.html' %}
 
     <div class='summary'>
         <div class='summary-stats'>

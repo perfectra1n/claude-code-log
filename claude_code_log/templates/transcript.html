@@ -8,17 +8,21 @@
     <title>{{ title }}</title>
     {% from 'components/session_nav.html' import render_session_nav %}
     <style>
-        {% include 'components/global_styles.css' %}
-        {% include 'components/message_styles.css' %}
-        {% include 'components/session_nav_styles.css' %}
-        {% include 'components/filter_styles.css' %}
-        {% include 'components/todo_styles.css' %}
-        {% include 'components/timeline_styles.css' %}
+{% include 'components/global_styles.css' %}
+{% include 'components/message_styles.css' %}
+{% include 'components/session_nav_styles.css' %}
+{% include 'components/filter_styles.css' %}
+{% include 'components/todo_styles.css' %}
+{% include 'components/timeline_styles.css' %}
+{% include 'components/search_styles.css' %}
     </style>
 </head>
 
 <body>
     <h1 id="title">{{ title }}</h1>
+
+    <!-- Search Component -->
+    {% include 'components/search.html' %}
 
     <!-- Timeline Component -->
     {% include 'components/timeline.html' %}

@@ -1,15 +1,17 @@
 <!-- Search Component -->
+{% if not is_transcript %}
+<!-- Full search component for index page -->
 <div id="searchContainer" class="search-container">
     <div class="search-input-wrapper">
-        <input type="text" 
-               id="searchInput" 
-               class="search-input" 
+        <input type="text"
+               id="searchInput"
+               class="search-input"
                placeholder="Search conversations..."
                autocomplete="off">
         <span class="search-hint">Ctrl+F</span>
         <button id="searchClear" class="search-clear" title="Clear search">✕</button>
     </div>
-    
+
     <div id="searchResultsInfo" class="search-results-info">
         <div class="search-navigation">
             <span id="searchResultCount">No results</span>
@@ -17,7 +19,7 @@
             <button id="searchNext" class="search-nav-btn" disabled title="Next match (F3)">↓</button>
         </div>
     </div>
-    
+
     <div class="search-options">
         <div class="search-option">
             <input type="checkbox" id="searchCaseSensitive">
@@ -44,6 +46,7 @@
         <!-- Results will be dynamically inserted here -->
     </div>
 </div>
+{% endif %}
 
 <script>
 (function() {
@@ -80,18 +83,12 @@
     function initSearch() {
         // Build search index from page content
         buildSearchIndex();
-        
+
         // Restore previous search state from localStorage
         restoreSearchState();
-        
+
         // Set up event listeners
         setupEventListeners();
-        
-        // Handle floating search for transcript pages
-        if (!searchState.isIndexPage) {
-            searchContainer.classList.add('floating');
-            createFloatingSearchButton();
-        }
     }
 
     // Build search index from current page
@@ -296,7 +293,12 @@
     }
 
     // Perform search
+    let isSearching = false;
     function performSearch(query) {
+        // Prevent concurrent searches
+        if (isSearching) return;
+        isSearching = true;
+
         searchState.query = query;
         searchClear.classList.toggle('visible', query.length > 0);
         
@@ -309,6 +311,7 @@
             if (searchState.isIndexPage && searchResultsPanel) {
                 searchResultsPanel.classList.remove('visible');
             }
+            isSearching = false;
             return;
         }
 
@@ -328,6 +331,7 @@
             // Invalid regex
             searchState.matches = [];
             updateSearchUI();
+            isSearching = false;
             return;
         }
 
@@ -381,6 +385,9 @@
         if (searchState.matches.length > 0 && !searchState.isIndexPage) {
             navigateToMatch(0);
         }
+
+        // Reset searching flag
+        isSearching = false;
     }
 
     // Highlight text in element
@@ -619,41 +626,23 @@
         saveSearchState();
     }
 
-    // Create floating search button for transcript pages
-    function createFloatingSearchButton() {
-        const button = document.createElement('button');
-        button.className = 'search-toggle floating-btn';
-        button.id = 'toggleSearch';
-        button.title = 'Search (Ctrl+F)';
-        button.textContent = '🔍';
-        document.body.appendChild(button);
-        
-        button.addEventListener('click', toggleFloatingSearch);
-    }
-
-    // Toggle floating search visibility
-    function toggleFloatingSearch() {
-        const isVisible = searchContainer.classList.contains('visible');
-        searchContainer.classList.toggle('visible');
-        document.getElementById('toggleSearch').classList.toggle('active');
-        
-        if (!isVisible) {
-            searchInput.focus();
-        }
-    }
 
     // Handle keyboard shortcuts
     function handleKeyboardShortcuts(e) {
         // Ctrl+F or Cmd+F
         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
-            if (!searchState.isIndexPage) {
-                toggleFloatingSearch();
+            // Open filter toolbar if not visible
+            const filterToolbar = document.querySelector('.filter-toolbar');
+            if (!filterToolbar.classList.contains('visible')) {
+                // Trigger filter button click to show toolbar
+                const filterButton = document.getElementById('filterMessages');
+                if (filterButton) filterButton.click();
             }
             searchInput.focus();
             searchInput.select();
         }
-        
+
         // F3 - Next match
         if (e.key === 'F3') {
             e.preventDefault();
@@ -663,12 +652,9 @@
                 navigateMatch(1);
             }
         }
-        
-        // Escape - Close search
+
+        // Escape - Close search results panel on index page
         if (e.key === 'Escape') {
-            if (!searchState.isIndexPage && searchContainer.classList.contains('visible')) {
-                toggleFloatingSearch();
-            }
             if (searchState.isIndexPage && searchResultsPanel && searchResultsPanel.classList.contains('visible')) {
                 searchResultsPanel.classList.remove('visible');
             }
@@ -719,13 +705,28 @@
     // Re-index when filters change (for transcript pages)
     if (!searchState.isIndexPage) {
         // Listen for filter changes
-        const observer = new MutationObserver(() => {
-            if (searchState.query && searchState.searchInFiltered) {
-                buildSearchIndex();
-                performSearch(searchState.query);
+        let isUpdatingFilters = false;
+        const observer = new MutationObserver((mutations) => {
+            // Only react to filtered-hidden class changes, not search highlights
+            const hasFilterChange = mutations.some(mutation => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                    const target = mutation.target;
+                    // Check if this is a message element getting filtered
+                    return target.classList && target.classList.contains('message');
+                }
+                return false;
+            });
+
+            if (hasFilterChange && !isUpdatingFilters && searchState.query && searchState.searchInFiltered) {
+                isUpdatingFilters = true;
+                setTimeout(() => {
+                    buildSearchIndex();
+                    performSearch(searchState.query);
+                    isUpdatingFilters = false;
+                }, 100);
             }
         });
-        
+
         // Observe changes to filtered-hidden class
         observer.observe(document.body, {
             attributes: true,

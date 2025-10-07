@@ -17,30 +17,64 @@
 }
 
 .filter-toolbar.visible {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
     gap: 16px;
 }
 
-.filter-label {
-    white-space: nowrap;
+.toolbar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #dee2e633;
 }
+
+.toolbar-header h3 {
+    margin: 0;
+    font-size: 1em;
+    color: #495057;
+    font-weight: 600;
+}
+
+.close-toolbar-btn {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    font-size: 20px;
+    padding: 5px;
+    border-radius: 50%;
+    transition: all 0.2s;
+    line-height: 1;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.close-toolbar-btn:hover {
+    background-color: #ffffff66;
+    color: #333;
+}
+
+.filter-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #dee2e633;
+}
+
 
 .filter-toggles {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    justify-content: center;
+    margin-bottom: 12px;
 }
 
-.filter-toolbar h3 {
-    margin: 0;
-    font-size: 1em;
-    color: #495057;
-    font-weight: 600;
-}
 
 .filter-toggle {
     padding: 6px 12px;
@@ -74,7 +108,6 @@
 .filter-actions {
     display: flex;
     gap: 6px;
-    white-space: nowrap;
 }
 
 .filter-action-btn {

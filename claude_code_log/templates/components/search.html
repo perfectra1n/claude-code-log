@@ -377,8 +377,17 @@
 
             const searchText = searchState.caseSensitive ? item.searchText : item.searchText.toLowerCase();
             const searchQuery = searchState.caseSensitive ? query : query.toLowerCase();
-            
-            if (searchState.useRegex ? searchPattern.test(searchText) : searchText.includes(searchQuery)) {
+
+            // Check if item matches the search
+            let matchesItem = false;
+            if (searchState.useRegex) {
+                searchPattern.lastIndex = 0;  // Reset lastIndex before each test to avoid skipping matches
+                matchesItem = searchPattern.test(searchText);
+            } else {
+                matchesItem = searchText.includes(searchQuery);
+            }
+
+            if (matchesItem) {
                 // Count actual matches in this item
                 const matchCount = countMatches(item.originalText || item.searchText, query);
                 totalMatchCount += matchCount;

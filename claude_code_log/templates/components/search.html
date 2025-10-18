@@ -632,15 +632,20 @@
         // Ctrl+F or Cmd+F
         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
-            // Open filter toolbar if not visible
+
+            // On transcript pages, open filter toolbar if not visible
             const filterToolbar = document.querySelector('.filter-toolbar');
-            if (!filterToolbar.classList.contains('visible')) {
+            if (filterToolbar && !filterToolbar.classList.contains('visible')) {
                 // Trigger filter button click to show toolbar
                 const filterButton = document.getElementById('filterMessages');
                 if (filterButton) filterButton.click();
             }
-            searchInput.focus();
-            searchInput.select();
+
+            // Focus and select search input
+            if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
         }
 
         // F3 - Next match

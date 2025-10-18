@@ -4,6 +4,23 @@
     width: 100%;
 }
 
+/* Keyboard shortcut hint */
+.search-hint {
+    position: absolute;
+    right: 45px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    font-size: 0.75em;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.search-hint.hidden {
+    opacity: 0;
+    visibility: hidden;
+}
+
 /* Inline Search for Filter Toolbar */
 .search-inline {
     width: 100%;

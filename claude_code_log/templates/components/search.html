@@ -68,6 +68,7 @@
     const searchContainer = document.getElementById('searchContainer');
     const searchInput = document.getElementById('searchInput');
     const searchClear = document.getElementById('searchClear');
+    const searchHint = document.querySelector('.search-hint');
     const searchResultsInfo = document.getElementById('searchResultsInfo');
     const searchResultCount = document.getElementById('searchResultCount');
     const searchPrev = document.getElementById('searchPrev');
@@ -89,6 +90,9 @@
 
         // Set up event listeners
         setupEventListeners();
+
+        // Initialize UI state
+        updateSearchInputState();
     }
 
     // Build search index from current page
@@ -249,11 +253,35 @@
         }
     }
 
+    // Toggle search hint and clear button visibility based on input content
+    function updateSearchInputState() {
+        const hasContent = searchInput && searchInput.value.length > 0;
+
+        // Toggle hint visibility
+        if (searchHint) {
+            if (hasContent) {
+                searchHint.classList.add('hidden');
+            } else {
+                searchHint.classList.remove('hidden');
+            }
+        }
+
+        // Toggle clear button visibility
+        if (searchClear) {
+            if (hasContent) {
+                searchClear.classList.add('visible');
+            } else {
+                searchClear.classList.remove('visible');
+            }
+        }
+    }
+
     // Setup event listeners
     function setupEventListeners() {
         // Search input
         let searchTimeout;
         searchInput.addEventListener('input', (e) => {
+            updateSearchInputState();
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => performSearch(e.target.value), 300);
         });
@@ -615,14 +643,14 @@
         searchState.query = '';
         searchState.matches = [];
         searchState.currentMatchIndex = 0;
-        searchClear.classList.remove('visible');
+        updateSearchInputState();
         clearHighlights();
         updateSearchUI();
-        
+
         if (searchState.isIndexPage && searchResultsPanel) {
             searchResultsPanel.classList.remove('visible');
         }
-        
+
         saveSearchState();
     }
 

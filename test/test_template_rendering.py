@@ -322,8 +322,8 @@ class TestTemplateRendering:
             assert "&quot;" in html_content
             # Should not contain unescaped HTML
             assert (
-                "<script>" not in html_content or html_content.count("<script>") <= 1
-            )  # Allow for the markdown script
+                "<script>" not in html_content or html_content.count("<script>") <= 2
+            )  # Allow for the markdown script and search script
 
 
 if __name__ == "__main__":

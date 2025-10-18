@@ -22,10 +22,6 @@
 
     <div class="search-options">
         <div class="search-option">
-            <input type="checkbox" id="searchCaseSensitive">
-            <label for="searchCaseSensitive">Case sensitive</label>
-        </div>
-        <div class="search-option">
             <input type="checkbox" id="searchRegex">
             <label for="searchRegex">Regex</label>
         </div>
@@ -53,13 +49,12 @@
     // Search state
     let searchState = {
         query: '',
-        caseSensitive: false,
         useRegex: false,
         searchInFiltered: true,
         currentMatchIndex: 0,
         matches: [],
         searchIndex: null,
-        isIndexPage: window.location.pathname.includes('index.html') || 
+        isIndexPage: window.location.pathname.includes('index.html') ||
                       window.location.pathname.endsWith('projects/') ||
                       (!window.location.pathname.includes('.html') && window.location.pathname.endsWith('/'))
     };
@@ -73,7 +68,6 @@
     const searchResultCount = document.getElementById('searchResultCount');
     const searchPrev = document.getElementById('searchPrev');
     const searchNext = document.getElementById('searchNext');
-    const searchCaseSensitive = document.getElementById('searchCaseSensitive');
     const searchRegex = document.getElementById('searchRegex');
     const searchInFiltered = document.getElementById('searchInFiltered');
     const searchResultsPanel = document.getElementById('searchResultsPanel');
@@ -113,7 +107,7 @@
                     stats: projectStats,
                     element: card,
                     link: projectLink,
-                    searchText: `${projectName} ${projectStats}`.toLowerCase(),
+                    searchText: `${projectName} ${projectStats}`,
                     originalText: `${projectName} ${projectStats}`
                 });
                 
@@ -132,7 +126,7 @@
                         sessionMeta: sessionMeta,
                         element: card,
                         link: sessionHref,
-                        searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`.toLowerCase(),
+                        searchText: `${projectName} ${sessionText} ${sessionPreview} ${sessionMeta}`,
                         originalText: `${sessionText} ${sessionPreview}`
                     });
                 });
@@ -175,14 +169,14 @@
     function createExcerpt(text, query, contextLength = 50) {
         if (!text || !query) return '';
         
-        // Create search pattern
+        // Create search pattern (always case-insensitive)
         let pattern;
         try {
             if (searchState.useRegex) {
-                pattern = new RegExp(query, searchState.caseSensitive ? 'g' : 'gi');
+                pattern = new RegExp(query, 'gi');
             } else {
                 const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                pattern = new RegExp(escapedQuery, searchState.caseSensitive ? 'g' : 'gi');
+                pattern = new RegExp(escapedQuery, 'gi');
             }
         } catch (e) {
             return text.substring(0, 100) + (text.length > 100 ? '...' : '');
@@ -233,19 +227,19 @@
         return excerpts.join(' ');
     }
 
-    // Count actual matches in text
+    // Count actual matches in text (always case-insensitive)
     function countMatches(text, query) {
         if (!text || !query) return 0;
-        
+
         try {
             let pattern;
             if (searchState.useRegex) {
-                pattern = new RegExp(query, searchState.caseSensitive ? 'g' : 'gi');
+                pattern = new RegExp(query, 'gi');
             } else {
                 const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                pattern = new RegExp(escapedQuery, searchState.caseSensitive ? 'g' : 'gi');
+                pattern = new RegExp(escapedQuery, 'gi');
             }
-            
+
             const matches = text.match(pattern);
             return matches ? matches.length : 0;
         } catch (e) {
@@ -290,11 +284,6 @@
         searchClear.addEventListener('click', clearSearch);
 
         // Search options
-        searchCaseSensitive.addEventListener('change', () => {
-            searchState.caseSensitive = searchCaseSensitive.checked;
-            if (searchState.query) performSearch(searchState.query);
-        });
-
         searchRegex.addEventListener('change', () => {
             searchState.useRegex = searchRegex.checked;
             if (searchState.query) performSearch(searchState.query);
@@ -346,14 +335,14 @@
         // Save search state
         saveSearchState();
         
-        // Create search pattern
+        // Create search pattern (always case-insensitive)
         let searchPattern;
         try {
             if (searchState.useRegex) {
-                searchPattern = new RegExp(query, searchState.caseSensitive ? 'g' : 'gi');
+                searchPattern = new RegExp(query, 'gi');
             } else {
                 const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                searchPattern = new RegExp(escapedQuery, searchState.caseSensitive ? 'g' : 'gi');
+                searchPattern = new RegExp(escapedQuery, 'gi');
             }
         } catch (e) {
             // Invalid regex
@@ -375,8 +364,9 @@
                 }
             }
 
-            const searchText = searchState.caseSensitive ? item.searchText : item.searchText.toLowerCase();
-            const searchQuery = searchState.caseSensitive ? query : query.toLowerCase();
+            // Always use case-insensitive search
+            const searchText = item.searchText.toLowerCase();
+            const searchQuery = query.toLowerCase();
 
             // Check if item matches the search
             let matchesItem = false;
@@ -608,14 +598,14 @@
         searchResultsContent.innerHTML = html;
     }
 
-    // Highlight text in search results
+    // Highlight text in search results (always case-insensitive)
     function highlightText(text, query) {
         if (!query) return text;
-        
-        const pattern = searchState.useRegex ? 
-            new RegExp(query, searchState.caseSensitive ? 'g' : 'gi') :
-            new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), searchState.caseSensitive ? 'g' : 'gi');
-        
+
+        const pattern = searchState.useRegex ?
+            new RegExp(query, 'gi') :
+            new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+
         return text.replace(pattern, match => `<span class="search-highlight">${match}</span>`);
     }
 
@@ -717,7 +707,6 @@
     function saveSearchState() {
         const state = {
             query: searchState.query,
-            caseSensitive: searchState.caseSensitive,
             useRegex: searchState.useRegex,
             searchInFiltered: searchState.searchInFiltered
         };
@@ -730,12 +719,10 @@
         if (saved) {
             try {
                 const state = JSON.parse(saved);
-                searchState.caseSensitive = state.caseSensitive || false;
                 searchState.useRegex = state.useRegex || false;
                 searchState.searchInFiltered = state.searchInFiltered !== false;
-                
+
                 // Update UI
-                searchCaseSensitive.checked = searchState.caseSensitive;
                 searchRegex.checked = searchState.useRegex;
                 searchInFiltered.checked = searchState.searchInFiltered;
             } catch (e) {

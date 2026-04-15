@@ -616,8 +616,11 @@ class HtmlRenderer(Renderer):
         project_summaries: list[dict[str, Any]],
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        search_corpus: Optional[list[dict[str, Any]]] = None,
     ) -> str:
         """Generate an HTML projects index page."""
+        import json
+
         title = title_for_projects_index(project_summaries, from_date, to_date)
         template_projects, template_summary = prepare_projects_index(project_summaries)
 
@@ -629,6 +632,9 @@ class HtmlRenderer(Renderer):
                 projects=template_projects,
                 summary=template_summary,
                 library_version=get_library_version(),
+                search_corpus_json=json.dumps(search_corpus, separators=(",", ":"))
+                if search_corpus
+                else None,
             )
         )
 
@@ -690,9 +696,12 @@ def generate_projects_index_html(
     project_summaries: list[dict[str, Any]],
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    search_corpus: Optional[list[dict[str, Any]]] = None,
 ) -> str:
     """Generate an index HTML page listing all projects using Jinja2 templates.
 
     This is a convenience function that delegates to HtmlRenderer.generate_projects_index.
     """
-    return HtmlRenderer().generate_projects_index(project_summaries, from_date, to_date)
+    return HtmlRenderer().generate_projects_index(
+        project_summaries, from_date, to_date, search_corpus=search_corpus
+    )

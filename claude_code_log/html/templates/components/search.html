@@ -54,7 +54,9 @@
         currentMatchIndex: 0,
         matches: [],
         searchIndex: null,
-        isIndexPage: null
+        isIndexPage: null,
+        miniSearch: null,
+        hasFtsCorpus: false
     };
 
     // DOM elements
@@ -98,14 +100,38 @@
     // Build search index from current page
     function buildSearchIndex() {
         searchState.searchIndex = [];
-        
+
         if (searchState.isIndexPage) {
-            // Index page: index projects with individual sessions
+            // Check if MiniSearch corpus is available (FTS-powered full-text search)
+            if (typeof SEARCH_CORPUS !== 'undefined' && typeof MiniSearch !== 'undefined') {
+                searchState.hasFtsCorpus = true;
+                searchState.miniSearch = new MiniSearch({
+                    fields: ['text', 'summary', 'project', 'preview'],
+                    storeFields: ['project', 'session', 'summary', 'link', 'preview', 'ts'],
+                    searchOptions: {
+                        boost: { summary: 3, preview: 2, project: 1.5 },
+                        fuzzy: 0.2,
+                        prefix: true
+                    }
+                });
+                searchState.miniSearch.addAll(SEARCH_CORPUS);
+
+                // Disable regex option (MiniSearch doesn't support it)
+                if (searchRegex) {
+                    searchRegex.disabled = true;
+                    searchRegex.checked = false;
+                    searchState.useRegex = false;
+                    searchRegex.parentElement.title = 'Regex not available with full-text search';
+                }
+                return;
+            }
+
+            // Fallback: DOM-based index (no FTS corpus)
             document.querySelectorAll('.project-card').forEach(card => {
                 const projectName = card.querySelector('.project-name a')?.textContent || '';
                 const projectStats = card.querySelector('.project-stats')?.textContent || '';
                 const projectLink = card.querySelector('.project-name a')?.getAttribute('href') || '';
-                
+
                 // Index the project itself
                 searchState.searchIndex.push({
                     type: 'project',
@@ -116,14 +142,14 @@
                     searchText: `${projectName} ${projectStats}`,
                     originalText: `${projectName} ${projectStats}`
                 });
-                
+
                 // Index individual sessions within the project
                 card.querySelectorAll('.session-link').forEach(link => {
                     const sessionText = link.textContent || '';
                     const sessionHref = link.getAttribute('href') || '';
                     const sessionPreview = link.querySelector('.session-preview')?.textContent?.trim() || '';
                     const sessionMeta = link.querySelector('.session-link-meta')?.textContent || '';
-                    
+
                     searchState.searchIndex.push({
                         type: 'session',
                         projectName: projectName,
@@ -144,7 +170,7 @@
                 const content = message.querySelector('.content')?.textContent || '';
                 const timestamp = message.querySelector('.timestamp')?.textContent || '';
                 const sessionId = findSessionForMessage(message);
-                
+
                 searchState.searchIndex.push({
                     type: 'message',
                     header: header,
@@ -340,7 +366,40 @@
 
         // Save search state
         saveSearchState();
-        
+
+        // Use MiniSearch for index page with FTS corpus
+        if (searchState.isIndexPage && searchState.miniSearch) {
+            searchState.matches = [];
+            const results = searchState.miniSearch.search(query, { limit: 100 });
+
+            results.forEach(result => {
+                const excerpt = result.preview || result.summary || '';
+                searchState.matches.push({
+                    type: 'session',
+                    projectName: result.project,
+                    link: result.link,
+                    sessionPreview: result.preview || '',
+                    sessionMeta: result.ts || '',
+                    matchCount: Math.max(1, Math.round(result.score)),
+                    excerpt: excerpt,
+                    score: result.score,
+                    element: null
+                });
+            });
+
+            searchState.totalMatchCount = results.length;
+
+            searchState.currentMatchIndex = searchState.matches.length > 0 ? 0 : -1;
+            updateSearchUI();
+
+            if (searchResultsPanel) {
+                displayIndexSearchResults();
+            }
+
+            isSearching = false;
+            return;
+        }
+
         // Create search pattern (always case-insensitive)
         let searchPattern;
         try {
@@ -361,7 +420,7 @@
         // Search through index
         searchState.matches = [];
         let totalMatchCount = 0;
-        
+
         searchState.searchIndex.forEach(item => {
             // Check if element is visible (for transcript pages with filters)
             if (!searchState.isIndexPage && searchState.searchInFiltered) {
@@ -387,23 +446,23 @@
                 // Count actual matches in this item
                 const matchCount = countMatches(item.originalText || item.searchText, query);
                 totalMatchCount += matchCount;
-                
+
                 // Add match count and excerpt to the item
                 const matchItem = {
                     ...item,
                     matchCount: matchCount,
                     excerpt: createExcerpt(item.originalText || item.searchText, query)
                 };
-                
+
                 searchState.matches.push(matchItem);
-                
+
                 // Highlight matches in the element
                 if (!searchState.isIndexPage) {
                     highlightInElement(item.element, searchPattern);
                 }
             }
         });
-        
+
         searchState.totalMatchCount = totalMatchCount;
 
         searchState.currentMatchIndex = searchState.matches.length > 0 ? 0 : -1;
@@ -522,17 +581,24 @@
         updateSearchUI();
     }
 
+    // Escape HTML to prevent XSS in search results
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
     // Display search results for index page
     function displayIndexSearchResults() {
         if (!searchResultsPanel || !searchResultsContent) return;
-        
+
         searchResultsPanel.classList.add('visible');
-        
+
         if (searchState.matches.length === 0) {
             searchResultsContent.innerHTML = '<div class="search-no-results">No results found</div>';
             return;
         }
-        
+
         // Group results by project and type
         const groupedResults = {};
         searchState.matches.forEach(match => {
@@ -540,67 +606,67 @@
             if (!groupedResults[key]) {
                 groupedResults[key] = { projects: [], sessions: [] };
             }
-            
+
             if (match.type === 'project') {
                 groupedResults[key].projects.push(match);
             } else if (match.type === 'session') {
                 groupedResults[key].sessions.push(match);
             }
         });
-        
+
         let html = '';
         Object.entries(groupedResults).forEach(([projectName, groups]) => {
             const totalMatches = [...groups.projects, ...groups.sessions];
-            const totalMatchCount = totalMatches.reduce((sum, match) => sum + match.matchCount, 0);
-            
+            const totalMatchCount = totalMatches.reduce((sum, match) => sum + (match.matchCount || 1), 0);
+
             html += `
                 <div class="search-result-group">
                     <div class="search-result-group-title">
-                        ${projectName}
-                        <span class="search-result-count">${totalMatchCount} matches in ${totalMatches.length} items</span>
+                        ${escapeHtml(projectName)}
+                        <span class="search-result-count">${totalMatchCount} match${totalMatchCount !== 1 ? 'es' : ''} in ${totalMatches.length} item${totalMatches.length !== 1 ? 's' : ''}</span>
                     </div>
             `;
-            
+
             // Show project matches first
             groups.projects.forEach(match => {
                 html += `
                     <div class="search-result-item">
-                        <a href="${match.link}">
+                        <a href="${escapeHtml(match.link)}">
                             <div class="search-result-session">📁 Project Overview</div>
                             <div class="search-result-excerpt">
-                                ${highlightText(match.excerpt, searchState.query)}
+                                ${highlightText(escapeHtml(match.excerpt), searchState.query)}
                             </div>
                             <div class="search-result-meta">
-                                <span>${match.matchCount} matches</span>
-                                <span>${match.stats}</span>
+                                <span>${match.matchCount || 1} matches</span>
+                                <span>${escapeHtml(match.stats || '')}</span>
                             </div>
                         </a>
                     </div>
                 `;
             });
-            
+
             // Show session matches
             groups.sessions.forEach(match => {
                 const sessionId = match.link.split('/').pop().replace('session-', '').replace('.html', '').substring(0, 8);
                 html += `
                     <div class="search-result-item">
-                        <a href="${match.link}">
-                            <div class="search-result-session">💬 Session ${sessionId}</div>
+                        <a href="${escapeHtml(match.link)}">
+                            <div class="search-result-session">💬 Session ${escapeHtml(sessionId)}</div>
                             <div class="search-result-excerpt">
-                                ${highlightText(match.excerpt, searchState.query)}
+                                ${highlightText(escapeHtml(match.excerpt), searchState.query)}
                             </div>
                             <div class="search-result-meta">
-                                <span>${match.matchCount} matches</span>
-                                <span>${match.sessionMeta}</span>
+                                <span>${match.matchCount || 1} matches</span>
+                                <span>${escapeHtml(match.sessionMeta || '')}</span>
                             </div>
                         </a>
                     </div>
                 `;
             });
-            
+
             html += '</div>';
         });
-        
+
         searchResultsContent.innerHTML = html;
     }
 

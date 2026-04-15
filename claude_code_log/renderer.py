@@ -2270,6 +2270,7 @@ class Renderer:
         project_summaries: list[dict[str, Any]],
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        search_corpus: Optional[list[dict[str, Any]]] = None,
     ) -> Optional[str]:
         """Generate a projects index page.
 

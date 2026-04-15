@@ -93,6 +93,14 @@
         {% endfor %}
     </div>
 
+    {% if search_corpus_json %}
+    <script>
+{% include 'components/minisearch.min.js' %}
+    </script>
+    <script>
+        var SEARCH_CORPUS = {{ search_corpus_json | safe }};
+    </script>
+    {% endif %}
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             {% include 'components/timezone_converter.js' %}

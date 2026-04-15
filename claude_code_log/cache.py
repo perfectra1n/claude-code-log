@@ -22,6 +22,8 @@ from .models import (
     QueueOperationTranscriptEntry,
     SummaryTranscriptEntry,
     SystemTranscriptEntry,
+    TextContent,
+    ToolResultContent,
     TranscriptEntry,
     UserTranscriptEntry,
 )
@@ -394,6 +396,39 @@ class CacheManager:
 
         return base
 
+    @staticmethod
+    def _extract_searchable_text(entry: TranscriptEntry) -> Optional[str]:
+        """Extract plain text from a transcript entry for FTS indexing.
+
+        Returns None for entry types that shouldn't be indexed.
+        """
+        if isinstance(entry, UserTranscriptEntry):
+            parts: list[str] = []
+            for item in entry.message.content:
+                if isinstance(item, TextContent):
+                    parts.append(item.text)
+                elif isinstance(item, ToolResultContent):
+                    if isinstance(item.content, str):
+                        parts.append(item.content[:200])
+                    else:
+                        for block in item.content:
+                            if block.get("type") == "text":
+                                parts.append(str(block.get("text", ""))[:200])
+            return " ".join(parts) if parts else None
+
+        if isinstance(entry, AssistantTranscriptEntry):
+            parts_a: list[str] = []
+            if entry.message:
+                for item in entry.message.content:
+                    if isinstance(item, TextContent):
+                        parts_a.append(item.text)
+            return " ".join(parts_a) if parts_a else None
+
+        if isinstance(entry, SummaryTranscriptEntry):
+            return entry.summary if entry.summary else None
+
+        return None
+
     def _deserialize_entry(self, row: sqlite3.Row) -> TranscriptEntry:
         """Convert SQLite row back to TranscriptEntry."""
         content_dict = json.loads(zlib.decompress(row["content"]).decode("utf-8"))
@@ -555,6 +590,14 @@ class CacheManager:
             ).fetchone()
             file_id = row["id"]
 
+            # Delete existing FTS entries for messages belonging to this file
+            conn.execute(
+                """DELETE FROM messages_fts WHERE rowid IN (
+                    SELECT id FROM messages WHERE file_id = ?
+                )""",
+                (file_id,),
+            )
+
             # Delete existing messages for this file
             conn.execute("DELETE FROM messages WHERE file_id = ?", (file_id,))
 
@@ -580,6 +623,26 @@ class CacheManager:
                 """,
                 serialized_entries,
             )
+
+            # Populate FTS index for new messages
+            fts_rows = conn.execute(
+                "SELECT id, session_id, type FROM messages WHERE file_id = ?",
+                (file_id,),
+            ).fetchall()
+
+            fts_entries: list[tuple[Any, Any, Any, str]] = []
+            for row, entry in zip(fts_rows, entries):
+                text = self._extract_searchable_text(entry)
+                if text:
+                    fts_entries.append(
+                        (row["id"], row["session_id"], row["type"], text)
+                    )
+
+            if fts_entries:
+                conn.executemany(
+                    "INSERT INTO messages_fts(rowid, session_id, role, text_content) VALUES (?, ?, ?, ?)",
+                    fts_entries,
+                )
 
             self._update_last_updated(conn)
             conn.commit()
@@ -1497,6 +1560,192 @@ class CacheManager:
 
         self._project_id = None
         return True
+
+    # ========== FTS Search Methods ==========
+
+    def backfill_fts(self) -> int:
+        """Backfill FTS index from existing messages.
+
+        Used after migration 004 creates the FTS table but existing
+        messages don't have FTS entries yet.
+
+        Returns:
+            Number of FTS entries created.
+        """
+        if self._project_id is None:
+            return 0
+
+        count = 0
+        with self._get_connection() as conn:
+            # Check if FTS needs backfill for this project
+            fts_count = conn.execute(
+                """SELECT COUNT(*) as cnt FROM messages_fts
+                   WHERE rowid IN (SELECT id FROM messages WHERE project_id = ?)""",
+                (self._project_id,),
+            ).fetchone()
+
+            msg_count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM messages WHERE project_id = ?",
+                (self._project_id,),
+            ).fetchone()
+
+            if fts_count and fts_count["cnt"] > 0:
+                return 0  # Already has FTS data
+
+            if not msg_count or msg_count["cnt"] == 0:
+                return 0  # No messages to backfill
+
+            # Process in batches to avoid memory issues
+            batch_size = 500
+            offset = 0
+            while True:
+                rows = conn.execute(
+                    """SELECT id, session_id, type, content FROM messages
+                       WHERE project_id = ?
+                       ORDER BY id
+                       LIMIT ? OFFSET ?""",
+                    (self._project_id, batch_size, offset),
+                ).fetchall()
+
+                if not rows:
+                    break
+
+                batch_fts: list[tuple[Any, Any, Any, str]] = []
+                for row in rows:
+                    try:
+                        content_dict = json.loads(
+                            zlib.decompress(row["content"]).decode("utf-8")
+                        )
+                        entry = create_transcript_entry(content_dict)
+                        text = self._extract_searchable_text(entry)
+                        if text:
+                            batch_fts.append(
+                                (row["id"], row["session_id"], row["type"], text)
+                            )
+                    except Exception:
+                        continue
+
+                if batch_fts:
+                    conn.executemany(
+                        "INSERT INTO messages_fts(rowid, session_id, role, text_content) VALUES (?, ?, ?, ?)",
+                        batch_fts,
+                    )
+                    count += len(batch_fts)
+
+                offset += batch_size
+
+            conn.commit()
+
+        return count
+
+    def get_search_corpus_for_sessions(
+        self, session_ids: List[str], max_chars_per_session: int = 2000
+    ) -> Dict[str, str]:
+        """Get concatenated searchable text per session from FTS.
+
+        Args:
+            session_ids: List of session IDs to get text for.
+            max_chars_per_session: Maximum characters of text per session.
+
+        Returns:
+            Dict mapping session_id to concatenated text content.
+        """
+        if self._project_id is None:
+            return {}
+
+        result: Dict[str, str] = {}
+        with self._get_connection() as conn:
+            for session_id in session_ids:
+                rows = conn.execute(
+                    """SELECT text_content FROM messages_fts
+                       WHERE session_id = ?
+                       ORDER BY rowid""",
+                    (session_id,),
+                ).fetchall()
+
+                if rows:
+                    full_text = " ".join(row["text_content"] for row in rows)
+                    result[session_id] = full_text[:max_chars_per_session]
+
+        return result
+
+
+def build_search_corpus(
+    db_path: Path,
+    project_summaries: List[Dict[str, Any]],
+    max_chars_per_session: int = 2000,
+) -> List[Dict[str, Any]]:
+    """Build a search corpus from FTS data for all projects.
+
+    Args:
+        db_path: Path to the cache database.
+        project_summaries: List of project summary dicts from converter.
+        max_chars_per_session: Max chars of searchable text per session.
+
+    Returns:
+        List of search corpus entries suitable for MiniSearch indexing.
+    """
+    corpus: List[Dict[str, Any]] = []
+
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        # Check if FTS table exists
+        table_check = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+        ).fetchone()
+        if not table_check:
+            return corpus
+
+        for project in project_summaries:
+            project_name = project.get("name", "")
+            sessions = project.get("sessions", [])
+
+            if not sessions:
+                continue
+
+            session_ids = [s.get("id", "") for s in sessions if s.get("id")]
+            if not session_ids:
+                continue
+
+            # Batch query FTS for all sessions in this project
+            placeholders = ",".join("?" * len(session_ids))
+            rows = conn.execute(
+                f"""SELECT session_id, GROUP_CONCAT(text_content, ' ') as full_text
+                    FROM messages_fts
+                    WHERE session_id IN ({placeholders})
+                    GROUP BY session_id""",
+                session_ids,
+            ).fetchall()
+
+            fts_texts = {row["session_id"]: row["full_text"] for row in rows}
+
+            for session in sessions:
+                session_id = session.get("id", "")
+                if not session_id:
+                    continue
+
+                full_text = fts_texts.get(session_id, "")
+                if full_text:
+                    full_text = full_text[:max_chars_per_session]
+
+                corpus.append(
+                    {
+                        "id": f"{project_name}/{session_id}",
+                        "project": project_name,
+                        "session": session_id[:8],
+                        "summary": session.get("summary") or "",
+                        "link": f"{project_name}/session-{session_id}.html",
+                        "preview": session.get("first_user_message", ""),
+                        "text": full_text,
+                        "ts": session.get("first_timestamp", ""),
+                    }
+                )
+
+    finally:
+        conn.close()
+
+    return corpus
 
 
 def get_all_cached_projects(

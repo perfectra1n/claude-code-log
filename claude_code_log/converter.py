@@ -23,7 +23,9 @@ from .utils import (
 from .cache import (
     CacheManager,
     SessionCacheData,
+    build_search_corpus,
     get_all_cached_projects,
+    get_cache_db_path,
     get_library_version,
 )
 from .parser import parse_timestamp
@@ -1861,6 +1863,12 @@ def process_projects_hierarchy(
             if use_cache:
                 try:
                     cache_manager = CacheManager(project_dir, library_version)
+                    # Backfill FTS index for existing messages (after migration 004)
+                    fts_count = cache_manager.backfill_fts()
+                    if fts_count > 0 and not silent:
+                        print(
+                            f"  {project_dir.name}: Indexed {fts_count} messages for full-text search"
+                        )
                 except Exception as e:
                     stats.add_warning(f"Failed to initialize cache: {e}")
 
@@ -2194,8 +2202,12 @@ def process_projects_hierarchy(
     renderer = get_renderer(output_format, image_export_mode)
     index_regenerated = False
     if renderer.is_outdated(index_path) or from_date or to_date or any_cache_updated:
+        # Build search corpus from FTS data
+        db_path = get_cache_db_path(projects_path)
+        search_corpus = build_search_corpus(db_path, project_summaries)
+
         index_content = renderer.generate_projects_index(
-            project_summaries, from_date, to_date
+            project_summaries, from_date, to_date, search_corpus=search_corpus
         )
         assert index_content is not None
         index_path.write_text(index_content, encoding="utf-8")

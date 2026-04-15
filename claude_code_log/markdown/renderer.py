@@ -921,6 +921,7 @@ class MarkdownRenderer(Renderer):
         project_summaries: list[dict[str, Any]],
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        search_corpus: Optional[list[dict[str, Any]]] = None,
     ) -> str:
         """Generate a Markdown projects index page."""
         title = title_for_projects_index(project_summaries, from_date, to_date)
